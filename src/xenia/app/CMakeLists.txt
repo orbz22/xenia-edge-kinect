@@ -68,6 +68,9 @@ target_link_libraries(xenia-app PRIVATE
   xenia-hid
   xenia-hid-nop
   xenia-kernel
+  xenia-nui
+  xenia-nui-nop
+  xenia-nui-replay
   xenia-patcher
   xenia-ui
   xenia-vfs
@@ -107,6 +110,7 @@ if(WIN32)
     xenia-debug-gdb
     xenia-gpu-d3d12
     xenia-hid-keyboard
+    xenia-nui-kinect
     xenia-ui-d3d12
     uxtheme
   )

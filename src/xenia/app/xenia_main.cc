@@ -69,6 +69,20 @@ DECLARE_string(gpu);
 #define HID_OPTIONS "[sdl, nop]"
 DEFINE_string(hid, "sdl", "Input system. Use: " HID_OPTIONS, "HID");
 
+// Available NUI (Kinect) systems:
+#include "xenia/nui/nop/nop_nui_system.h"
+#include "xenia/nui/replay/replay_nui_system.h"
+#if XE_PLATFORM_WIN32
+#include "xenia/nui/kinect/kinect_nui_system.h"
+#endif  // XE_PLATFORM_WIN32
+
+#if XE_PLATFORM_WIN32
+#define NUI_OPTIONS "[any, kinect, replay, nop]"
+#else
+#define NUI_OPTIONS "[any, replay, nop]"
+#endif
+DEFINE_string(nui, "any", "NUI (Kinect) system. Use: " NUI_OPTIONS, "Kinect");
+
 DEFINE_path(
     storage_root, "",
     "Root path for persistent internal data storage (config, etc.), or empty "
@@ -336,6 +350,7 @@ class EmulatorApp final : public xe::ui::WindowedApp {
   static std::unique_ptr<gpu::GraphicsSystem> CreateGraphicsSystem();
   static std::vector<std::unique_ptr<hid::InputDriver>> CreateInputDrivers(
       ui::Window* window);
+  static std::unique_ptr<nui::NuiSystem> CreateNuiSystem();
 
   void EmulatorThread();
   void ShutdownEmulatorThreadFromUIThread();
@@ -526,6 +541,25 @@ std::vector<std::unique_ptr<hid::InputDriver>> EmulatorApp::CreateInputDrivers(
   return drivers;
 }
 
+std::unique_ptr<nui::NuiSystem> EmulatorApp::CreateNuiSystem() {
+  Factory<nui::NuiSystem> factory;
+  // Registration order is what "any" means: Create takes the first backend
+  // that reports itself available. The replay comes first because it is only
+  // available when nui_replay names a file that exists, so naming a recording
+  // is an unambiguous request for it - whereas KinectNuiSystem::IsAvailable
+  // is true whenever Kinect10.dll loads, sensor or no sensor, and would
+  // otherwise turn a replay run into a live one, and a --nui_record replay
+  // run into a real recording session.
+  factory.Add<nui::replay::ReplayNuiSystem>("replay");
+#if XE_PLATFORM_WIN32
+  factory.Add<nui::kinect::KinectNuiSystem>("kinect");
+#endif  // XE_PLATFORM_WIN32
+  // With no recording named and no runtime installed, "any" falls past both
+  // to the nop backend.
+  factory.Add<nui::nop::NopNuiSystem>("nop");
+  return factory.Create(cvars::nui);
+}
+
 bool EmulatorApp::OnInitialize() {
   Profiler::Initialize();
   Profiler::ThreadEnter("Main");
@@ -650,7 +684,8 @@ void EmulatorApp::EmulatorThread() {
   // launch — after per-game cvar overrides have been applied.
   X_STATUS result = emulator_->Setup(
       emulator_window_->window(), emulator_window_->imgui_drawer(), true,
-      CreateAudioSystem, CreateGraphicsSystem, CreateInputDrivers);
+      CreateAudioSystem, CreateGraphicsSystem, CreateInputDrivers,
+      CreateNuiSystem);
   if (XFAILED(result)) {
     XELOGE("Failed to setup emulator: {:08X}", result);
     app_context().RequestDeferredQuit();

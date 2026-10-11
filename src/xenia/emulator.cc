@@ -52,6 +52,7 @@
 #include "xenia/kernel/xam/title_image_device.h"
 #include "xenia/kernel/xam/ui/disc_swap_ui.h"
 #include "xenia/kernel/xam/xam_content_device.h"
+#include "xenia/kernel/xam/nui_state.h"
 #include "xenia/kernel/xam/xam_module.h"
 #include "xenia/kernel/xam/xam_state.h"
 #include "xenia/kernel/xam/xdbf/spa_info.h"
@@ -61,6 +62,7 @@
 #include "xenia/kernel/xfile.h"
 #include "xenia/kernel/xthread.h"
 #include "xenia/memory.h"
+#include "xenia/nui/nui_system.h"
 #include "xenia/ui/file_picker.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
@@ -208,6 +210,7 @@ Emulator::Emulator(const std::filesystem::path& command_line,
       audio_media_player_(),
       graphics_system_(),
       input_system_(),
+      nui_system_(),
       export_resolver_(),
       file_system_(),
       kernel_state_(),
@@ -269,6 +272,15 @@ void Emulator::Shutdown() {
   if (audio_system_) {
     audio_system_->Shutdown();
   }
+  if (nui_system_) {
+    // The kernel's frame feed reads the NUI system and calls into the guest,
+    // so it has to be stopped before either of them is torn down.
+    if (kernel_state_ && kernel_state_->xam_state() &&
+        kernel_state_->xam_state()->nui_state()) {
+      kernel_state_->xam_state()->nui_state()->Shutdown();
+    }
+    nui_system_->Shutdown();
+  }
 
   main_thread_ = nullptr;
 
@@ -280,6 +292,17 @@ void Emulator::Shutdown() {
   graphics_system_.reset();
   audio_media_player_.reset();
   audio_system_.reset();
+  if (nui_system_ && !nui_system_->IsSafeToDestroy()) {
+    // A backend thread is wedged somewhere we cannot reach it, and it will
+    // touch the system again if it ever comes back. Losing the memory beats
+    // freeing it out from under a thread that is still using it.
+    XELOGE(
+        "NUI: backend worker thread is stuck in the driver; leaking the NUI "
+        "system to avoid a use-after-free");
+    static_cast<void>(nui_system_.release());
+  } else {
+    nui_system_.reset();
+  }
 
   kernel_state_.reset();
   file_system_.reset();
@@ -314,7 +337,8 @@ X_STATUS Emulator::Setup(
     std::function<std::unique_ptr<gpu::GraphicsSystem>()>
         graphics_system_factory,
     std::function<std::vector<std::unique_ptr<hid::InputDriver>>(ui::Window*)>
-        input_driver_factory) {
+        input_driver_factory,
+    std::function<std::unique_ptr<nui::NuiSystem>()> nui_system_factory) {
   // Store parameters for reuse across Shutdown/Setup cycles.
   // Only overwrite if non-null so re-calls after Shutdown keep prior values.
   if (display_window) {
@@ -332,6 +356,9 @@ X_STATUS Emulator::Setup(
   }
   if (input_driver_factory) {
     input_driver_factory_ = input_driver_factory;
+  }
+  if (nui_system_factory) {
+    nui_system_factory_ = nui_system_factory;
   }
 
   // Initialize clock.
@@ -498,8 +525,28 @@ X_STATUS Emulator::SetupSubsystems() {
     audio_media_player_->Setup();
   }
 
+  // The NUI (Kinect) is created with the other subsystems, once the kernel it
+  // talks to exists, and lives until Shutdown. Hosts that don't want one pass
+  // no factory and run without a nui_system().
+  if (nui_system_factory_ && !nui_system_) {
+    XELOGI("NUI: initializing...");
+    nui_system_ = nui_system_factory_();
+    if (!nui_system_) {
+      XELOGE("NUI: cannot initialize nui_system!");
+      return X_STATUS_NOT_IMPLEMENTED;
+    }
+    XELOGI("NUI: starting nui_system...");
+    result = nui_system_->Setup(kernel_state_.get());
+    if (result) {
+      XELOGE("NUI: failed to setup nui_system!");
+      return result;
+    }
+    XELOGI("NUI: system {} ready", nui_system_->name());
+  }
+
   active_gpu_backend_ = cvars::gpu;
   active_apu_backend_ = cvars::apu;
+
   return result;
 }
 

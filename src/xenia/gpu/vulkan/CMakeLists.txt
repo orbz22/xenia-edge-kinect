@@ -29,6 +29,7 @@ if(XENIA_BUILD_MISC)
     xenia-gpu xenia-gpu-vulkan xenia-hid xenia-hid-nop xenia-hid-portal
     xenia-kernel xenia-patcher xenia-ui xenia-ui-vulkan xenia-vfs
     capstone fmt glslang-spirv imgui libavcodec libavutil mspack snappy xxhash
+    xenia-nui xenia-nui-nop xenia-nui-replay
   )
   if(XE_TARGET_X86_64)
     target_link_libraries(xenia-gpu-vulkan-trace-viewer PRIVATE xenia-cpu-backend-x64)
@@ -61,6 +62,7 @@ if(XENIA_BUILD_MISC)
     xenia-gpu xenia-gpu-vulkan xenia-hid xenia-hid-nop xenia-hid-portal
     xenia-kernel xenia-patcher xenia-ui xenia-ui-vulkan xenia-vfs
     capstone fmt glslang-spirv imgui libavcodec libavutil mspack snappy xxhash
+    xenia-nui xenia-nui-nop xenia-nui-replay
   )
   if(XE_TARGET_X86_64)
     target_link_libraries(xenia-gpu-vulkan-trace-dump PRIVATE xenia-cpu-backend-x64)
