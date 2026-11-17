@@ -85,7 +85,7 @@ X_STATUS ReplayNuiSystem::Setup(kernel::KernelState* kernel_state) {
     XELOGE(
         "NUI: nui_record and nui_replay both name {}. Recording over the "
         "recording being replayed would destroy it; drop one of the two.",
-        xe::path_to_utf8(path_));
+        xe::strip_pii(xe::path_to_utf8(path_)));
     return X_STATUS_UNSUCCESSFUL;
   }
 
@@ -208,7 +208,7 @@ bool ReplayNuiSystem::SeekToFirstFrame() {
 void ReplayNuiSystem::WorkerThreadMain() {
   SetDeviceStatus(DeviceStatus::kInitializing);
   SetDeviceStatus(DeviceStatus::kReady);
-  XELOGI("NUI: replaying {} ({} frames)", xe::path_to_utf8(path_),
+  XELOGI("NUI: replaying {} ({} frames)", xe::strip_pii(xe::path_to_utf8(path_)),
          frame_count_);
 
   bool have_previous_frame = false;
@@ -219,7 +219,7 @@ void ReplayNuiSystem::WorkerThreadMain() {
       // the beginning rather than from wherever the loop had reached.
       if (!SeekToFirstFrame()) {
         XELOGE("NUI: {} could not be rewound; the replay has stopped.",
-               xe::path_to_utf8(path_));
+               xe::strip_pii(xe::path_to_utf8(path_)));
         SetDeviceStatus(DeviceStatus::kError);
         break;
       }
@@ -229,14 +229,14 @@ void ReplayNuiSystem::WorkerThreadMain() {
       XELOGI(
           "NUI: the title has started streaming; {} restarts at its first "
           "frame, {} frames in",
-          xe::path_to_utf8(path_), published_frame_count_);
+          xe::strip_pii(xe::path_to_utf8(path_)), published_frame_count_);
     }
 
     auto frame = frame_pool_.Acquire();
     uint64_t timestamp_us = 0;
     if (!ReadNextFrame(frame.get(), &timestamp_us)) {
       XELOGE("NUI: {} could not be read any further; the replay has stopped.",
-             xe::path_to_utf8(path_));
+             xe::strip_pii(xe::path_to_utf8(path_)));
       SetDeviceStatus(DeviceStatus::kError);
       break;
     }

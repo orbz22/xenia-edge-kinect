@@ -1711,9 +1711,13 @@ dword_result_t XamShowNuiControllerRequiredUI_entry(dword_t tracking_id,
   LogNuiCall("NUI: XamShowNuiControllerRequiredUI({}, {})", tracking_id.value(),
              user_index.value());
 
-  if (cvars::headless) {
+  const Emulator* emulator = kernel_state()->emulator();
+  xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
+  // Edge has no headless cvar; with no drawer there is nowhere to show it.
+  if (!imgui_drawer) {
     return X_ERROR_SUCCESS;
   }
+  xe::hid::InputSystem* input_system = emulator->input_system();
 
   std::string title = "Controller Required";
   std::string desc = "The game is asking for a controller to carry on with.";
@@ -1722,10 +1726,8 @@ dword_result_t XamShowNuiControllerRequiredUI_entry(dword_t tracking_id,
   // caller's job, and XamIsNuiUIActive reads it.
   kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
-  const Emulator* emulator = kernel_state()->emulator();
-  xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
   xeXamDispatchDialog<MessageBoxDialog>(
-      new MessageBoxDialog(imgui_drawer, title, desc, {"OK"}, 0),
+      new MessageBoxDialog(imgui_drawer, input_system, title, desc, {"OK"}, 0),
       [](MessageBoxDialog*) -> X_RESULT { return X_ERROR_SUCCESS; }, 0);
   return X_ERROR_SUCCESS;
 }

@@ -19,7 +19,6 @@
 #include "xenia/app/game_library.h"
 #include "xenia/app/nui_depth_preview_dialog.h"
 #include "xenia/app/nui_guide_dialog.h"
-#include "xenia/app/profile_dialogs.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/kernel/xam/indie_game.h"
