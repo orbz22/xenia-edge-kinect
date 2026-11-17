@@ -3462,21 +3462,29 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
   }
 
   // Pixel shader analysis.
+  // A multipass draw (frame buffer export suppressed) is still rasterized for
+  // a pixel shader that writes to memory, so the bound pixel shader is
+  // analyzed first - see the Direct3D 12 command processor.
   bool primitive_polygonal = draw_util::IsPrimitivePolygonal(regs);
-  bool is_rasterization_done =
-      draw_util::IsRasterizationPotentiallyDone(regs, primitive_polygonal);
+  auto bound_pixel_shader = static_cast<VulkanShader*>(active_pixel_shader());
+  if (bound_pixel_shader) {
+    pipeline_cache_->AnalyzeShaderUcode(*bound_pixel_shader);
+  }
+  bool memexport_used_bound_pixel =
+      !draw_util::IsVIZSurveyDraw(regs) && bound_pixel_shader &&
+      bound_pixel_shader->memexport_eM_written() != 0 &&
+      edram_mode == xenos::EdramMode::kColorDepth;
+  bool is_rasterization_done = draw_util::IsRasterizationPotentiallyDone(
+      regs, primitive_polygonal, memexport_used_bound_pixel);
   VulkanShader* pixel_shader = nullptr;
   if (is_rasterization_done) {
     // See xenos::EdramMode for explanation why the pixel shader is only used
     // when it's kColorDepth here.
     if (edram_mode == xenos::EdramMode::kColorDepth) {
-      pixel_shader = static_cast<VulkanShader*>(active_pixel_shader());
-      if (pixel_shader) {
-        pipeline_cache_->AnalyzeShaderUcode(*pixel_shader);
-        if (!draw_util::IsPixelShaderNeededWithRasterization(*pixel_shader,
-                                                             regs)) {
-          pixel_shader = nullptr;
-        }
+      pixel_shader = bound_pixel_shader;
+      if (pixel_shader && !draw_util::IsPixelShaderNeededWithRasterization(
+                              *pixel_shader, regs)) {
+        pixel_shader = nullptr;
       }
     }
   } else {

@@ -2979,7 +2979,8 @@ bool MetalCommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   // Pixel shader analysis.
   bool primitive_polygonal = draw_util::IsPrimitivePolygonal(regs);
   bool is_rasterization_done =
-      draw_util::IsRasterizationPotentiallyDone(regs, primitive_polygonal);
+      draw_util::IsRasterizationPotentiallyDone(regs, primitive_polygonal,
+                                                false);
   Shader* pixel_shader = nullptr;
   if (is_rasterization_done) {
     if (edram_mode == xenos::EdramMode::kColorDepth) {
