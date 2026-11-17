@@ -452,9 +452,33 @@ X_STATUS Emulator::Setup(
 
   patcher_ = std::make_unique<xe::patcher::Patcher>(patches_path());
 
+  // The NUI (Kinect) host system has to exist before the kernel state: the
+  // XAM NuiState is built inside KernelState and registers its device status
+  // callback with nui_system() in its constructor. Without that callback the
+  // guest is never told the sensor became ready. It lives until Shutdown;
+  // hosts that don't want one pass no factory and run without a nui_system().
+  if (nui_system_factory_) {
+    XELOGI("NUI: initializing...");
+    nui_system_ = nui_system_factory_();
+    if (!nui_system_) {
+      XELOGE("NUI: cannot initialize nui_system!");
+      return X_STATUS_NOT_IMPLEMENTED;
+    }
+  }
+
   XELOGI("{}: Initializing Kernel...", __func__);
   // Shared kernel state.
   kernel_state_ = std::make_unique<xe::kernel::KernelState>(this);
+
+  if (nui_system_) {
+    XELOGI("NUI: starting nui_system...");
+    const X_STATUS nui_result = nui_system_->Setup(kernel_state_.get());
+    if (nui_result) {
+      XELOGE("NUI: failed to setup nui_system!");
+      return nui_result;
+    }
+    XELOGI("NUI: system {} ready", nui_system_->name());
+  }
   // Its profile manager signed in the configured profiles without notifying.
   on_signin_changed();
 #define LOAD_KERNEL_MODULE(t) \
@@ -523,25 +547,6 @@ X_STATUS Emulator::SetupSubsystems() {
     audio_media_player_ = std::make_unique<apu::AudioMediaPlayer>(
         audio_system_.get(), kernel_state_.get(), host_media_session_.get());
     audio_media_player_->Setup();
-  }
-
-  // The NUI (Kinect) is created with the other subsystems, once the kernel it
-  // talks to exists, and lives until Shutdown. Hosts that don't want one pass
-  // no factory and run without a nui_system().
-  if (nui_system_factory_ && !nui_system_) {
-    XELOGI("NUI: initializing...");
-    nui_system_ = nui_system_factory_();
-    if (!nui_system_) {
-      XELOGE("NUI: cannot initialize nui_system!");
-      return X_STATUS_NOT_IMPLEMENTED;
-    }
-    XELOGI("NUI: starting nui_system...");
-    result = nui_system_->Setup(kernel_state_.get());
-    if (result) {
-      XELOGE("NUI: failed to setup nui_system!");
-      return result;
-    }
-    XELOGI("NUI: system {} ready", nui_system_->name());
   }
 
   active_gpu_backend_ = cvars::gpu;
