@@ -71,6 +71,8 @@ target_link_libraries(xenia-app PRIVATE
   xenia-nui
   xenia-nui-nop
   xenia-nui-replay
+  xenia-nui-zcam
+  xenia-nui-vmc
   xenia-patcher
   xenia-ui
   xenia-vfs

@@ -72,6 +72,8 @@ DEFINE_string(hid, "sdl", "Input system. Use: " HID_OPTIONS, "HID");
 // Available NUI (Kinect) systems:
 #include "xenia/nui/nop/nop_nui_system.h"
 #include "xenia/nui/replay/replay_nui_system.h"
+#include "xenia/nui/vmc/vmc_nui_system.h"
+#include "xenia/nui/zcam/zcam_nui_system.h"
 #if XE_PLATFORM_WIN32
 #include "xenia/nui/kinect/kinect_nui_system.h"
 #endif  // XE_PLATFORM_WIN32
@@ -551,6 +553,10 @@ std::unique_ptr<nui::NuiSystem> EmulatorApp::CreateNuiSystem() {
   // otherwise turn a replay run into a live one, and a --nui_record replay
   // run into a real recording session.
   factory.Add<nui::replay::ReplayNuiSystem>("replay");
+#if XE_PLATFORM_WIN32
+  factory.Add<nui::zcam::ZCamNuiSystem>("zcam");
+  factory.Add<nui::vmc::VmcNuiSystem>("vmc");
+#endif  // XE_PLATFORM_WIN32
 #if XE_PLATFORM_WIN32
   factory.Add<nui::kinect::KinectNuiSystem>("kinect");
 #endif  // XE_PLATFORM_WIN32
