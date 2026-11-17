@@ -4,7 +4,104 @@
     </a>
 </p>
 
-<h1 align="center">Xenia Edge - Xbox 360 Emulator</h1>
+<h1 align="center">Xenia Edge Kinect - Xbox 360 Emulator</h1>
+
+Xenia Edge Kinect is an unofficial fork of [Xenia Edge](https://github.com/has207/xenia-edge)
+that focuses on Kinect titles. You can play with a real Kinect sensor, or
+with an ordinary webcam through body-tracking software such as
+[Dollars MONO](https://www.dollarsmocap.com/).
+
+This fork is not affiliated with the Xenia, Xenia Canary or Xenia Edge
+projects. Report problems with Kinect, avatars or this build here, not
+upstream.
+
+## Kinect input
+
+Pick the input with `--nui=<backend>` and enable NUI with
+`--allow_nui_initialization=true`.
+
+| Backend | Input | Platform | Status |
+|---|---|---|---|
+| `vmc` | Webcam, through any [VMC protocol](https://protocol.vmc.info/) sender such as Dollars MONO | Windows | Tested with Kinect Adventures! |
+| `kinect` | Kinect for Windows sensor, or Xbox 360 Kinect with its PC USB/power adapter | Windows | Verified upstream in the Canary fork; not yet tested in this build |
+| `zcam` | Depth frames from a local Z-Cam bridge on TCP port 8001 | Windows | Experimental |
+| `replay` | A depth recording made with `--nui_record` | All | For testing |
+| `nop` | No sensor | All | Default fallback |
+
+### Webcam with Dollars MONO
+
+1. Start Dollars MONO and track yourself with your webcam.
+2. In Dollars MONO, turn on VMC protocol output to `127.0.0.1`, port `39539`.
+3. Start the game:
+
+   ```
+   xenia_edge.exe --nui=vmc --allow_nui_initialization=true --allow_avatar_initialization=true "<path to game>"
+   ```
+
+The `vmc` backend renders the received pose as a Kinect depth image. The
+game's own skeletal tracker then runs on that image, as it would on a
+console. Stand so that your whole upper body is visible to the webcam.
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--nui_vmc_port` | `39539` | UDP port the VMC sender sends to. |
+| `--nui_vmc_distance_mm` | `2200` | Distance from the virtual sensor to the body's hips. |
+| `--nui_vmc_mirror` | `false` | Swap left and right. |
+| `--nui_vmc_stand` | `true` | Keep the legs straight, so a seated player still looks like a whole standing body. |
+| `--nui_vmc_floor` | `true` | Render a floor plane under the body. |
+| `--nui_vmc_hips_x` | `1.0` | How much of your sideways movement is followed; `0` keeps the body centred. |
+| `--nui_vmc_reach` | `0.3` | Metres a raised hand is pushed toward the sensor. |
+| `--nui_vmc_jump_gain` | `1.5` | How much a rise of the hips is amplified into a jump. |
+| `--nui_show_depth_preview` | `false` | Show the depth frames the game receives. |
+
+### Real Kinect sensor
+
+Install the
+[Kinect for Windows SDK 1.8](https://www.microsoft.com/en-us/download/details.aspx?id=40278)
+(it includes the runtime and drivers), connect the sensor, and run with
+`--nui=kinect`. No Kinect SDK is needed to build.
+
+## Avatars
+
+Run with `--allow_avatar_initialization=true`. Avatar assets come from the
+game disc when it carries an `AvatarAssetPack` (Kinect Adventures! does). A
+profile without an avatar gets a generated one. For other titles, point `--avatar_asset_pack_path` at
+the avatar asset package from your own console or from a game disc's
+`$SystemUpdate` folder. This fork ships no system files or keys.
+
+## Tested games
+
+| Game | Result |
+|---|---|
+| Kinect Adventures! (Europe, Rev 3) | Player detected with `--nui=vmc`, and the avatar is shown on the play-space screen. Full gameplay is still being tested. |
+
+## Building
+
+Build as you would build Xenia Edge. On Windows the build also needs
+`meson` and `mako` (`pip install meson mako`), `ninja` on `PATH`, and the
+Slang compiler (`python xenia-build.py slang`). Then:
+
+```
+python xenia-build.py build --config=release
+```
+
+The executable is written to `build\bin\Windows\Release\xenia_edge.exe`.
+
+## More
+
+[docs/nui.md](docs/nui.md) documents the Kinect protocol, flags, recording and
+replay, and the Kinect Guide gesture. It was written for the Canary fork, so
+read `xenia_canary.exe` as `xenia_edge.exe` and `xenia-canary.config.toml` as
+`xenia-edge.config.toml`.
+
+## Credits
+
+- [has207/xenia-edge](https://github.com/has207/xenia-edge): the emulator this fork is based on.
+- [ryantimjohn/xenia-canary](https://github.com/ryantimjohn/xenia-canary): the Kinect (NUI) stack, the `kinect` and `replay` backends, and the GPU read-back fixes the skeletal tracker needs.
+- [dcwestra/xenia-edge](https://github.com/dcwestra/xenia-edge): the avatar implementation.
+- The Xenia and Xenia Canary teams.
+
+## About Xenia Edge
 
 Xenia Edge is yet another experimental fork of the Xenia emulator, originally based on [Xenia Canary](https://github.com/xenia-canary/xenia-canary). Edge builds have evolved far beyond Canary in many areas, starting from the UI and ranging to kernel emulation, networking, graphics backend features, JIT improvements, arm64 and macOS support, and many others. Exact differences are hard to pin down any longer due to how extensive they are and how much has been ported back into Canary over time to various degrees. In general Edge will run more games, and run them better, but this code is under active development and there are always regressions so YMMV. If something isn't working on Edge it's worth testing on Canary.
 
