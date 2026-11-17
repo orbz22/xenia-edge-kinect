@@ -36,6 +36,40 @@ namespace xam {
 
 namespace {
 
+// Edge reaches guest physical memory written by the host the way XFile::Read
+// does: through the physical view, which is never host-protected, and then by
+// telling the watchers (the GPU's shared memory and texture caches) that the
+// range changed. A plain write through the virtual view is not seen by the
+// GPU, so the tracker's shaders would keep sampling a stale, empty depth ring.
+struct HostWriteTarget {
+  uint8_t* host = nullptr;
+  xe::PhysicalHeap* physical_heap = nullptr;
+};
+
+HostWriteTarget BeginHostWrite(Memory* memory, uint32_t address,
+                               uint32_t length) {
+  HostWriteTarget target;
+  xe::BaseHeap* heap = memory->LookupHeap(address);
+  if (heap && heap->heap_type() == xe::HeapType::kGuestPhysical) {
+    target.physical_heap = static_cast<xe::PhysicalHeap*>(heap);
+    target.physical_heap->ProvideReadWatchedEdgePages(address, length);
+    target.host = memory->TranslatePhysical(
+        target.physical_heap->GetPhysicalAddress(address));
+  } else {
+    target.host = memory->TranslateVirtual<uint8_t*>(address);
+  }
+  return target;
+}
+
+void EndHostWrite(const HostWriteTarget& target, uint32_t address,
+                  uint32_t length) {
+  if (target.physical_heap && length) {
+    target.physical_heap->TriggerCallbacks(
+        xe::global_critical_region::AcquireDirect(), address, length, true,
+        true, true, false, true);
+  }
+}
+
 // Switch (read off the texture the runtime binds over the depth ring: format
 // word 0x1A22005A, whose endianness field is 1 = 8-in-16, so the GPU swaps
 // every halfword on its way in and the ring itself therefore holds
@@ -827,7 +861,9 @@ void NuiCamera::FeedDepthFrame(const xe::nui::DepthFrame& frame) {
                              nullptr, staging_.data(),
                              /*mirror_columns=*/true);
   auto* memory = kernel_state_->memory();
-  auto* slot = memory->TranslateVirtual<uint16_t*>(request.buffer);
+  const HostWriteTarget write_target =
+      BeginHostWrite(memory, request.buffer, request.length);
+  auto* slot = reinterpret_cast<uint16_t*>(write_target.host);
   if constexpr (kRingIsBigEndian) {
     // copy_and_swap_16_aligned loads and stores whole SSE registers, so both
     // ends have to be 16-byte aligned. Every ring a title allocates is (the
@@ -844,6 +880,7 @@ void NuiCamera::FeedDepthFrame(const xe::nui::DepthFrame& frame) {
   } else {
     std::memcpy(slot, staging_.data(), pixel_count * sizeof(uint16_t));
   }
+  EndHostWrite(write_target, request.buffer, request.length);
 
   const uint32_t sequence =
       depth_sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -875,11 +912,14 @@ void NuiCamera::FeedColourFrame() {
   // only consumes depth; a constant black image keeps the runtime's colour
   // ring turning over instead of starving.
   auto* memory = kernel_state_->memory();
-  auto* bytes = memory->TranslateVirtual<uint8_t*>(request.buffer);
+  const HostWriteTarget write_target =
+      BeginHostWrite(memory, request.buffer, request.length);
+  uint8_t* bytes = write_target.host;
   for (uint32_t i = 0; i + 1 < request.length; i += 2) {
     bytes[i] = kColourBlackLuma;
     bytes[i + 1] = kColourBlackChroma;
   }
+  EndHostWrite(write_target, request.buffer, request.length);
 
   const uint32_t sequence =
       colour_sequence_.fetch_add(1, std::memory_order_relaxed) + 1;

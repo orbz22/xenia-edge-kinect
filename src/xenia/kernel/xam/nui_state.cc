@@ -16,6 +16,7 @@
 #include <iterator>
 #include <limits>
 
+#include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
@@ -28,6 +29,9 @@
 #include "xenia/kernel/xconfig.h"
 #include "xenia/nui/nui_flags.h"
 #include "xenia/nui/nui_gpu_readback.h"
+
+DECLARE_bool(readback_resolve);
+DECLARE_bool(memexport_enable);
 
 namespace xe {
 namespace kernel {
@@ -343,20 +347,18 @@ void NuiState::EnableSkeletalTrackerReadback() {
   if (readback_enabled_for_tracker_.exchange(true, std::memory_order_relaxed)) {
     return;
   }
-  const gpu::ReadbackResolveMode resolve_mode = gpu::GetReadbackResolveMode();
+  // Edge keeps resolve and memexport output visible to the CPU by default
+  // (readback_resolve and memexport_enable both default to true), so this
+  // usually has nothing to raise. When the user turned either off, it is
+  // raised in memory for this session only and never written to the config.
   const xe::nui::GpuReadbackPlan plan = xe::nui::PlanSkeletalTrackerGpuReadback(
-      resolve_mode == gpu::ReadbackResolveMode::kDisabled,
-      gpu::GetGPUSetting(gpu::GPUSetting::ReadbackMemexport));
-  // Both settings are raised for this session only. Xenia is deciding this for
-  // the user rather than being asked for it, so it must not end up in the
-  // config the user keeps: a title that needs the stall should not leave every
-  // other title paying it.
+      !cvars::readback_resolve, cvars::memexport_enable);
   if (plan.enable_resolve) {
-    gpu::SetReadbackResolveModeForSession("full");
+    cvars::readback_resolve = true;
     readback_raised_resolve_.store(true, std::memory_order_relaxed);
   }
   if (plan.enable_memexport) {
-    gpu::SetGPUSettingForSession(gpu::GPUSetting::ReadbackMemexport, 1);
+    cvars::memexport_enable = true;
     readback_raised_memexport_.store(true, std::memory_order_relaxed);
   }
   if (plan.enables_resolve_and_memexport()) {
@@ -370,8 +372,7 @@ void NuiState::EnableSkeletalTrackerReadback() {
   }
   if (plan.resolve_configured) {
     // The only two modes that are not the compiled default.
-    XELOGI("NUI: resolve read-back is already configured as {}, leaving it",
-           resolve_mode == gpu::ReadbackResolveMode::kFull ? "full" : "fast");
+    XELOGI("NUI: resolve read-back is already on, leaving it");
   }
   if (plan.memexport_configured) {
     XELOGI("NUI: memexport read-back is already on, leaving it");
@@ -386,10 +387,10 @@ void NuiState::RestoreSkeletalTrackerReadback() {
   // Back to the compiled defaults, which is where they were: a value that was
   // anything else counted as chosen and was never raised in the first place.
   if (readback_raised_resolve_.exchange(false, std::memory_order_relaxed)) {
-    gpu::SetReadbackResolveModeForSession("none");
+    cvars::readback_resolve = false;
   }
   if (readback_raised_memexport_.exchange(false, std::memory_order_relaxed)) {
-    gpu::SetGPUSettingForSession(gpu::GPUSetting::ReadbackMemexport, 0);
+    cvars::memexport_enable = false;
   }
   XELOGI("NUI: skeletal tracker read-back settings put back");
 }
