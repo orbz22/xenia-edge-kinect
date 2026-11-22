@@ -88,12 +88,6 @@ constexpr uint8_t kCameraFirmwareMinor = 1;
 // request is not the one this kernel knows.
 constexpr uint32_t kRawToDepthTableEntries = 8192;
 
-// One YUY2 pixel pair is Y U Y V, and black is a luma of 16 with both chroma
-// channels at 128. Written as bytes, so the pattern does not depend on the
-// host's byte order.
-constexpr uint8_t kColourBlackLuma = 0x10;
-constexpr uint8_t kColourBlackChroma = 0x80;
-
 // One frame of a 30 Hz depth stream, in microseconds. The runtime multiplies
 // every code-25 value by 50 to reach the Xenon timebase of 49.875 MHz, so this
 // arrives as 1,666,650 ticks, which is the frame period its own hard-coded
@@ -783,6 +777,7 @@ NuiCameraStats NuiCamera::GetStats() const {
 }
 
 void NuiCamera::FeedThreadMain() {
+  colour_camera_tried_ = false;
   uint64_t last_sequence = 0;
   const char* stop_reason = "the camera was shut down";
   while (feed_running_.load(std::memory_order_acquire)) {
@@ -821,6 +816,7 @@ void NuiCamera::FeedThreadMain() {
   // diagnosis will see it, and stop claiming to be streaming. Anything queued
   // from here on is refused rather than left for a thread that is gone.
   feed_running_.store(false, std::memory_order_release);
+  colour_camera_.reset();
   XELOGW(
       "NUI: frame feed stopped, {}, after {} depth and {} colour frames, {} "
       "dropped",
@@ -908,16 +904,27 @@ void NuiCamera::FeedColourFrame() {
     return;
   }
 
-  // There is no colour camera behind the host NUI system, and the tracker
-  // only consumes depth; a constant black image keeps the runtime's colour
-  // ring turning over instead of starving.
+  // The tracker only consumes depth, and the colour ring is what a title takes
+  // its photos from. A host webcam fills it when nui_colour_camera names one;
+  // otherwise a constant black image keeps the ring turning over instead of
+  // starving. The camera is opened here rather than with the feed, so that it
+  // only runs while a title actually streams colour.
+  if (!colour_camera_tried_ && !cvars::nui_colour_camera.empty()) {
+    colour_camera_tried_ = true;
+    colour_camera_ = xe::nui::ColourCamera::Open(cvars::nui_colour_camera);
+  }
+  const xe::nui::ColourByteOrder order =
+      xe::nui::ParseColourByteOrder(cvars::nui_colour_order);
   auto* memory = kernel_state_->memory();
   const HostWriteTarget write_target =
       BeginHostWrite(memory, request.buffer, request.length);
   uint8_t* bytes = write_target.host;
-  for (uint32_t i = 0; i + 1 < request.length; i += 2) {
-    bytes[i] = kColourBlackLuma;
-    bytes[i + 1] = kColourBlackChroma;
+  // Bytes in the order the sensor would put them in memory, so the pattern
+  // does not depend on the host's byte order.
+  if (request.length != xe::nui::kColourFrameBytes || !colour_camera_ ||
+      !colour_camera_->CopyLatestFrame(bytes, order,
+                                       cvars::nui_colour_mirror)) {
+    xe::nui::FillColourBlack(bytes, request.length, order);
   }
   EndHostWrite(write_target, request.buffer, request.length);
 

@@ -13,11 +13,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
 #include "xenia/kernel/xam/nui_camera_request.h"
 #include "xenia/kernel/xthread.h"
+#include "xenia/nui/colour_camera.h"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -154,9 +156,10 @@ class NuiCamera {
   bool IsRequestStillWritable(const NuiPendingRequest& request);
 
   void FeedThreadMain();
-  // Hands the newest host frame to the oldest queued depth request, and a
-  // constant black image to the oldest queued colour request. Frames with
-  // nothing queued are dropped: the runtime only ever wants the newest one.
+  // Hands the newest host frame to the oldest queued depth request, and the
+  // newest webcam frame (or black, without one) to the oldest queued colour
+  // request. Frames with nothing queued are dropped: the runtime only ever
+  // wants the newest one.
   void FeedDepthFrame(const xe::nui::DepthFrame& frame);
   void FeedColourFrame();
   // Answers the requests that carry no frame: the asynchronous ones with
@@ -207,6 +210,12 @@ class NuiCamera {
   // Owned by the feed thread alone: the host-endian frame on its way to a
   // ring slot.
   std::vector<uint16_t> staging_;
+
+  // Owned by the feed thread alone: the host webcam the nui_colour_camera
+  // cvar names, opened by the first colour request a feed sees and closed
+  // when the feed ends, and whether this feed has tried to open it already.
+  std::unique_ptr<xe::nui::ColourCamera> colour_camera_;
+  bool colour_camera_tried_ = false;
 
   // The stream bits the runtime configured with request code 27.
   std::atomic<uint32_t> stream_flags_ = {0};

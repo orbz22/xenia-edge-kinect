@@ -49,6 +49,24 @@ DEFINE_string(nui_replay, "",
               "when it ends.",
               "Kinect");
 
+DEFINE_string(nui_colour_camera, "",
+              "Host webcam that feeds the Kinect colour camera, which titles "
+              "use for photos. Empty keeps the colour camera black; "
+              "\"default\" takes the first video capture device; any other "
+              "value takes the first device whose name contains it. The "
+              "device is only opened while a title streams colour. Windows "
+              "only.",
+              "Kinect");
+
+DEFINE_string(nui_colour_order, "uyvy",
+              "Byte order of the colour frames handed to titles: uyvy, as the "
+              "sensor sends them, or yuy2.",
+              "Kinect");
+
+DEFINE_bool(nui_colour_mirror, false,
+            "Swap left and right in the colour frames handed to titles.",
+            "Kinect");
+
 DEFINE_bool(nui_guide_gesture, true,
             "Watch the skeletons a Kinect title hands xam for the Kinect Guide "
             "gesture, the left arm held still out to the side and down at "
