@@ -1772,9 +1772,31 @@ tracker reports no player at all.
   authored 30 fps. Other samples show varying slowdown; a uniform exact
   half-speed error has not been established, and the text clock's rate has not
   been measured. The cause remains unresolved.
-* **Colour and identity.** The colour ring receives constant black YUV 4:2:2.
-  Identity messages provide the success answers needed for startup, without
-  biometric enrolment, matching or callback delivery.
+* **Colour and identity.** The colour ring receives constant black YUV 4:2:2
+  unless `--nui_colour_camera` names a host webcam (Windows, Media
+  Foundation), whose centre 4:3 crop is scaled to 640x480 and converted to
+  UYVY. Identity messages provide the success answers needed for startup,
+  without biometric enrolment, matching or callback delivery.
+* **Photos (title `4D5308ED`).** No photo is taken, with or without a webcam.
+  Each River Rush photo moment spawns an `ASpringfieldSnapshotActor`, which
+  calls the natives `RecordSnapshotActorStartTime` (0x82b2a1e8) and
+  `SetMaterialParamLoopTime` (0x82b2a2e8), then `LogBug_18015` (0x82b2a5c8)
+  about 75 frames later, and nothing else: `TickProcessSnapshot`,
+  `ScoreDepthFrame` and `AcquireColorFrame` are never called, so no colour
+  frame is read and `photodrive:` is never created. The decision is made in
+  UnrealScript. Ruled out: the photo privacy flag (cleared by the guest
+  command line `-NOPHOTOPRIVACY`, `-IGNOREPHOTOPRIVACY` or `-KEYNOTE`, passed
+  with `--cl`), granting offline profiles every privilege the title checks
+  (0xFC and 0xFE), and forcing the photo owner to controller 0. The photo save
+  path (0x82b783e0) also needs `GetFirstPrimaryTrackedPlayerControllerId` to
+  return a controller and `IsDeviceValid` to accept it, and the save wrapper
+  at 0x831b13c0 rejects a device id of 0 with 0x57 without calling
+  `XamContentCreateEx`.
+* **Tilt under `vmc`.** The virtual sensor reports a level angle whatever the
+  title commands, because its depth image is rendered from a level camera. A
+  reported tilt that disagrees with the image gives the engagement chain a
+  wrong gravity vector, and a player who lost tracking could then not join
+  again ("JOIN IN" in the pause screen).
 * **Guest object lifetime.** A pointer reference from
   `ObReferenceObjectByHandle` contributes to the first handle's count. A
   concurrent close may therefore give a title-defined close procedure a count

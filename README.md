@@ -52,7 +52,19 @@ console. Stand so that your whole upper body is visible to the webcam.
 | `--nui_vmc_hips_x` | `1.0` | How much of your sideways movement is followed; `0` keeps the body centred. |
 | `--nui_vmc_reach` | `0.3` | Metres a raised hand is pushed toward the sensor. |
 | `--nui_vmc_jump_gain` | `1.5` | How much a rise of the hips is amplified into a jump. |
+| `--nui_vmc_frozen_ms` | `1000` | A pose that has not changed for this long counts as nobody in front of the sensor; `0` turns this off. |
+| `--nui_colour_camera` | empty | Webcam for the Kinect colour camera: empty keeps it black, `default` takes the first camera, any other value the first camera whose name contains it. It can share the webcam with Dollars MONO when Windows allows several apps to use the camera. Windows only. |
+| `--nui_colour_mirror` | `false` | Swap left and right in the colour image. |
 | `--nui_show_depth_preview` | `false` | Show the depth frames the game receives. |
+
+The virtual sensor has no motor and always reports itself level, because the
+depth image is rendered from a level camera. Some VMC senders, Dollars MONO
+among them, keep sending the last pose after they lose you; the frozen-pose
+check above turns that into "nobody there", so the game pauses and lets you
+join again when you step back in.
+
+Kinect Adventures! does not take photos yet: its photo moments start, then
+end before they capture a colour frame.
 
 ### Real Kinect sensor
 
