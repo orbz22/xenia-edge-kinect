@@ -65,6 +65,13 @@ DEFINE_bool(nui_vmc_stand, true,
             "a player seated at a desk is still a whole body for --nui=vmc.",
             "Kinect");
 
+DEFINE_int32(nui_vmc_frozen_ms, 1000,
+             "A player whose captured pose has not changed at all for this "
+             "many milliseconds is treated as gone, as a Kinect sees no one "
+             "once the player walks away. A sender that loses the player "
+             "keeps sending one unchanging pose. 0 disables the check.",
+             "Kinect");
+
 namespace xe {
 namespace nui {
 namespace vmc {
@@ -513,6 +520,12 @@ struct Player {
   float rest_hips_y = 0.9f;
   bool have_rest = false;
   float hips_min = 1e9f, hips_max = -1e9f;
+  // The bones as they last changed, and when. A live capture never sends
+  // exactly the same pose twice, so a pose that stays bit-for-bit the same
+  // means the sender has lost the player.
+  std::array<Bone, kBoneCount> last_bones = {};
+  std::chrono::steady_clock::time_point last_change;
+  bool frozen = false;
 };
 
 }  // namespace
@@ -543,9 +556,16 @@ void VmcNuiSystem::WorkerThreadMain() {
       }
       continue;
     }
-    const DWORD timeout_ms = 2;
-    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
-               reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+    // Non-blocking, so that every waiting packet can be drained at once: a
+    // sender that sends faster than one packet per read would otherwise leave
+    // a growing backlog, and the pose read would lag behind the player.
+    u_long non_blocking = 1;
+    ioctlsocket(socket, FIONBIO, &non_blocking);
+    // Room for a burst, should the sender split a pose over many packets.
+    const int receive_buffer = 1 << 20;
+    setsockopt(socket, SOL_SOCKET, SO_RCVBUF,
+               reinterpret_cast<const char*>(&receive_buffer),
+               sizeof(receive_buffer));
     players[i].socket = socket;
     XELOGI("NUI: VMC: player {} listens on UDP 127.0.0.1:{}", i + 1, port);
   }
@@ -571,23 +591,49 @@ void VmcNuiSystem::WorkerThreadMain() {
   Clock::duration render_time = {};
   Renderer renderer;
   std::vector<uint8_t> packet(65536);
+  uint64_t packets_received = 0;
   while (worker_running_.load(std::memory_order_acquire)) {
+    // Sleep until a packet arrives or the next frame is due, whichever is
+    // first.
+    fd_set readable;
+    FD_ZERO(&readable);
+    for (const Player& player : players) {
+      if (player.socket != INVALID_SOCKET) {
+        FD_SET(player.socket, &readable);
+      }
+    }
+    const auto wait = std::chrono::duration_cast<std::chrono::microseconds>(
+        next_frame - Clock::now());
+    timeval timeout = {};
+    timeout.tv_usec = long(std::clamp<int64_t>(wait.count(), 0, 33000));
+    select(0, &readable, nullptr, nullptr, &timeout);
     for (int i = 0; i < kPlayerCount; ++i) {
       Player& player = players[i];
       if (player.socket == INVALID_SOCKET) {
         continue;
       }
-      const int received =
-          recv(player.socket, reinterpret_cast<char*>(packet.data()),
-               static_cast<int>(packet.size()), 0);
-      if (received > 0) {
+      // Drain everything waiting; only the newest pose matters.
+      for (;;) {
+        const int received =
+            recv(player.socket, reinterpret_cast<char*>(packet.data()),
+                 static_cast<int>(packet.size()), 0);
+        if (received <= 0) {
+          break;
+        }
+        ++packets_received;
         bool got_bone = false;
         HandlePacket(packet.data(), size_t(received), player.pose, &got_bone);
-        if (got_bone) {
-          if (player.last_bone == Clock::time_point()) {
-            XELOGI("NUI: VMC: receiving the pose of player {}", i + 1);
-          }
-          player.last_bone = Clock::now();
+        if (!got_bone) {
+          continue;
+        }
+        if (player.last_bone == Clock::time_point()) {
+          XELOGI("NUI: VMC: receiving the pose of player {}", i + 1);
+        }
+        player.last_bone = Clock::now();
+        if (std::memcmp(player.last_bones.data(), player.pose.bones.data(),
+                        sizeof(player.last_bones)) != 0) {
+          player.last_bones = player.pose.bones;
+          player.last_change = player.last_bone;
         }
       }
     }
@@ -599,9 +645,26 @@ void VmcNuiSystem::WorkerThreadMain() {
     auto frame = frame_pool_.Acquire();
     bool fresh[kPlayerCount];
     int fresh_count = 0;
+    const int32_t frozen_ms = cvars::nui_vmc_frozen_ms;
     for (int i = 0; i < kPlayerCount; ++i) {
-      fresh[i] = players[i].last_bone != Clock::time_point() &&
-                 now - players[i].last_bone < std::chrono::milliseconds(500);
+      Player& player = players[i];
+      fresh[i] = player.last_bone != Clock::time_point() &&
+                 now - player.last_bone < std::chrono::milliseconds(500);
+      if (fresh[i] && frozen_ms > 0) {
+        const bool frozen =
+            now - player.last_change >= std::chrono::milliseconds(frozen_ms);
+        if (frozen != player.frozen) {
+          player.frozen = frozen;
+          if (frozen) {
+            XELOGI("NUI: VMC: the pose of player {} has not changed for {} "
+                   "ms; showing no one until it moves again",
+                   i + 1, frozen_ms);
+          } else {
+            XELOGI("NUI: VMC: player {} is moving again", i + 1);
+          }
+        }
+        fresh[i] = !frozen;
+      }
       fresh_count += fresh[i] ? 1 : 0;
     }
     renderer.distance = float(cvars::nui_vmc_distance_mm) / 1000.0f;
@@ -659,13 +722,14 @@ void VmcNuiSystem::WorkerThreadMain() {
     PublishFrame(std::move(frame));
     if ((++published % 300) == 0) {
       XELOGI(
-          "NUI: VMC: {} depth frames published, render {:.1f} ms, players "
-          "{}, captured hips y {:.3f}..{:.3f} rest {:.3f}",
+          "NUI: VMC: {} depth frames published, render {:.1f} ms, {} "
+          "packets, players {}, captured hips y {:.3f}..{:.3f} rest {:.3f}",
           published,
           std::chrono::duration<double, std::milli>(render_time).count() / 300,
-          fresh_count, players[0].hips_min, players[0].hips_max,
-          players[0].rest_hips_y);
+          packets_received, fresh_count, players[0].hips_min,
+          players[0].hips_max, players[0].rest_hips_y);
       render_time = {};
+      packets_received = 0;
       for (Player& player : players) {
         player.hips_min = 1e9f;
         player.hips_max = -1e9f;
@@ -687,8 +751,12 @@ bool VmcNuiSystem::GetTiltDegrees(int32_t* out_degrees) {
   if (GetTiltOverrideDegrees(out_degrees)) {
     return true;
   }
-  // No motor: the title is told the angle it last asked for.
-  *out_degrees = tilt_degrees_.load(std::memory_order_acquire);
+  // There is no motor, and the depth image is rendered from a level virtual
+  // camera, so the sensor always reports level. Reporting the angle the title
+  // asked for would give it a gravity vector that disagrees with the image,
+  // and its engagement classifier then refuses to let a standing player join
+  // again after tracking is lost (stuck on "JOIN IN" in a pause).
+  *out_degrees = 0;
   return true;
 }
 
